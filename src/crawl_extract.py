@@ -4,6 +4,8 @@
 # Convert them into full URLs
 # Keep only internal links (same website domain)
 # Return the list
+import json
+from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -28,3 +30,18 @@ def get_homepage_links(base_url):
 
     print(f"Found {len(links)} internal links on the homepage.")
     return list(links)
+
+def main():
+    base_url = "https://radetco.com/"
+    urls = get_homepage_links(base_url)
+
+    # Save the URLs to a file for the next step
+    output_path = Path("outputs/candidate_urls.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output_path.write_text(json.dumps(urls, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"Saved candidate URLs to {output_path}")
+
+if __name__ == "__main__":
+    main()
