@@ -6,6 +6,7 @@
 # Return the list
 import json
 from pathlib import Path
+import sys
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -32,7 +33,11 @@ def get_homepage_links(base_url):
     return list(links)
 
 def main():
-    base_url = "https://radetco.com/"
+    if len(sys.argv) < 2:
+        print("Usage: python extract_urls.py <base_url>")
+        sys.exit(1)
+
+    base_url = sys.argv[1]
     urls = get_homepage_links(base_url)
 
     # Save the URLs to a file for the next step
