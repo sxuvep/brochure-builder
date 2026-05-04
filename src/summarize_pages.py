@@ -48,14 +48,12 @@ def summarize_one_page(page: dict) -> dict:
    raw = response.output_text.strip()
    return json.loads(raw)
 
-def main():
-   input_dir = Path("outputs/pages")
-   output_dir = Path("outputs/summaries")
+def summarize_pages_from_dir(input_dir: Path, output_dir: Path) -> list[Path]:
    output_dir.mkdir(parents=True, exist_ok=True)
-
    files = sorted(input_dir.glob("*.json"))
    print(f"Found {len(files)} page files to summarize.\n")
 
+   written_files = []
    for f in files:
       page = json.loads(f.read_text(encoding="utf-8"))
 
@@ -63,9 +61,17 @@ def main():
           summary = summarize_one_page(page)
           output_path = output_dir / f.name
           output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+          written_files.append(output_path)
           print(f"Summarized {f.name} -> {output_path.name}")
       except Exception as e:
           print(f"Failed to summarize {f.name}: {e}")
+
+   return written_files
+
+def main():
+   input_dir = Path("outputs/pages")
+   output_dir = Path("outputs/summaries")
+   summarize_pages_from_dir(input_dir, output_dir)
 
 if __name__ == "__main__":
     main()

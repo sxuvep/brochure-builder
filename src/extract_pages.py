@@ -4,13 +4,33 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 
-def fetch_html(url: str) -> str:
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()  # Raise an error for HTTP errors
-    return response.text
+def fetch_html(url: str, retries: int = 2) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
+    }
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < retries:
+                wait_time = (2 ** attempt)
+                print(f"Retry {attempt + 1}/{retries} for {url} after {wait_time}s...")
+                time.sleep(wait_time)
+    raise last_error
 
 def extract_text(html:str) -> tuple[str,str]:
     soup = BeautifulSoup(html,"lxml")
@@ -40,6 +60,52 @@ def safe_filename(url: str) -> str:
         path = "home"
     return re.sub(r"[^a-zA-Z0-9_-]", "_", path)
 
+def extract_pages_from_links(links: list[dict], output_dir: Path) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written_files = []
+    errors = []
+
+    def process_link(i: int, item: dict) -> tuple:
+        url = item.get("url")
+        page_type = item.get("type", "unknown")
+        if not url:
+            return None
+
+        try:
+            html = fetch_html(url)
+            title, text = extract_text(html)
+
+            page_data = {
+                "type": page_type,
+                "url": url,
+                "title": title,
+                "text": text[:15000],
+            }
+
+            filename = f"{i:02d}_{page_type}_{safe_filename(url)}.json"
+            output_path = output_dir / filename
+            output_path.write_text(json.dumps(page_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"✓ Saved {filename} (chars = {len(text)})")
+            return output_path
+        except Exception as e:
+            error_msg = f"Error processing {url}: {e}"
+            print(error_msg)
+            errors.append(error_msg)
+            return None
+
+    # Use ThreadPoolExecutor for parallel extraction (up to 5 concurrent)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_link, i, item): i for i, item in enumerate(links, start=1)}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                written_files.append(result)
+
+    if errors and not written_files:
+        raise RuntimeError(f"Failed to extract any pages. Details:\n" + "\n".join(errors[:3]))
+
+    return written_files
+
 def main():
     input_file = Path("outputs/final_urls.json")
     output_dir = Path("outputs/pages")
@@ -50,31 +116,7 @@ def main():
 
     print(f"Extracting content from {len(links)} pages...\n")
 
-    for i, item in enumerate(links, start=1):
-        url = item.get("url")
-        page_type = item.get("type", "unknown")
-
-        try:
-            html = fetch_html(url)
-            title,text = extract_text(html)
-
-            page_data = {
-                "type": page_type,
-                "url":url,
-                "title": title,
-                "text": text[:15000] # limit text to 15000 characters to avoid very large files and also because LLMs have input limits so we want to keep it manageable for the next steps
-            }
-
-            filename = f"{i:02d}_{page_type}_{safe_filename(url)}.json"
-
-            output_path = output_dir / filename
-
-            output_path.write_text(json.dumps(page_data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-            print(f"Saved {filename} (chars = {len(text)})")
-
-        except Exception as e:
-            print(f"Error processing {url}: {e}")
+    extract_pages_from_links(links, output_dir)
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,10 @@
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from docx import Document
+from docx.shared import Pt
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -37,6 +40,7 @@ Formatting requirements:
 - Use bullet lists for offerings and who-we-serve.
 - In "Proof & Results", mention awards/case studies if present (no made-up metrics).
 - End with a clear call to action and include the website + contact URL if available.
+- If company_context is provided in the user payload, use it to tailor tone, audience focus, and emphasis.
 """.strip()
 
 def extract_website(summaries):
@@ -62,13 +66,29 @@ def load_summaries(summaries_dir : Path) -> list[dict]:
   """
   Reads all summary JSON files from outputs/summaries/ and returns a list of dicts.
   """
-  files = sorted(summaries_dir.glob(".json"))
+  files = sorted(summaries_dir.glob("*.json"))
   summaries = []
   for f in files:
     summaries.append(json.loads(f.read_text(encoding="utf-8")))
   return summaries
 
-def build_brochure_markdown(company_name: str, website:str, summaries: list[dict]) -> str:
+def build_brochure_from_summaries_dir(summaries_dir: Path, output_path: Path) -> str:
+  if not summaries_dir.exists():
+    raise FileNotFoundError("outputs/summaries not found. Run summarize_pages.py first to generate page summaries.")
+
+  summaries = load_summaries(summaries_dir)
+  if not summaries:
+    raise ValueError("No summary files found in outputs/summaries.")
+
+  company_name = extract_company_name(summaries)
+  website = extract_website(summaries)
+  brochure_md = build_brochure_markdown(company_name, website, summaries)
+
+  output_path.parent.mkdir(parents=True, exist_ok=True)
+  output_path.write_text(brochure_md, encoding="utf-8")
+  return brochure_md
+
+def build_brochure_markdown(company_name: str, website: str, summaries: list[dict], company_context: str = "") -> str:
   """
   Calls OpenAI once to synthesize the brochure from summaries and returns Markdown text.
   """
@@ -84,7 +104,9 @@ def build_brochure_markdown(company_name: str, website:str, summaries: list[dict
         "Get Started / Contact": ["contact", "pricing"]
     },
     "summaries": summaries,
-}
+  }
+  if company_context and company_context.strip():
+      user_payload["company_context"] = company_context.strip()
 
   response = client.responses.create(
       model="gpt-4o-mini",
@@ -93,23 +115,32 @@ def build_brochure_markdown(company_name: str, website:str, summaries: list[dict
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
       ]
   )
-  return response.output_text.strip() # the generated brochure in Markdown format which is by default in the output_text field
+  return response.output_text.strip()
+
+
+def export_to_docx(markdown_text: str, output_path: Path) -> Path:
+    """Convert brochure Markdown to a .docx file."""
+    doc = Document()
+    for line in markdown_text.splitlines():
+        if line.startswith("# "):
+            doc.add_heading(line[2:].strip(), level=0)
+        elif line.startswith("## "):
+            doc.add_heading(line[3:].strip(), level=1)
+        elif line.startswith("### "):
+            doc.add_heading(line[4:].strip(), level=2)
+        elif re.match(r'^[-*] ', line):
+            para = doc.add_paragraph(style="List Bullet")
+            para.add_run(line[2:].strip())
+        elif line.strip():
+            doc.add_paragraph(line.strip())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(output_path))
+    return output_path
 
 def main():
   summaries_dir = Path("outputs/summaries")
   output_path = Path("outputs/brochure.md")
-
-  if not summaries_dir.exists():
-    raise FileNotFoundError("outputs/summaries not found. Run summarize_pages.py first to generate page summaries.")
-  summaries = load_summaries(summaries_dir)
-
-  company_name = extract_company_name(summaries)
-  website = extract_website(summaries)
-  print(f"Loaded {len(summaries)} page summaries. Building brochure...\n")
-
-  brochure_md = build_brochure_markdown(company_name, website, summaries)
-  output_path.parent.mkdir(parents=True, exist_ok=True)
-  output_path.write_text(brochure_md, encoding="utf-8")
+  brochure_md = build_brochure_from_summaries_dir(summaries_dir, output_path)
 
   print("Wrote outputs/brochure.md")
 

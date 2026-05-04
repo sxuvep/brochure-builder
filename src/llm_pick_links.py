@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sys
 from urllib.parse import urlparse, urljoin, urldefrag
 
 from dotenv import load_dotenv
@@ -56,10 +57,10 @@ Rules:
 Return JSON in this format:
 {
   "links": [
-    {"type": "about", "url": "https://full.url/about"},
-    {"type": "products", "url": "https://full.url/solutions"},
-    {"type": "careers", "url": "https://full.url/careers"},
-    {"type": "contact", "url": "https://full.url/contact"}
+    {"type": "about", "title": "About Us", "url": "https://full.url/about"},
+    {"type": "products", "title": "Products & Solutions", "url": "https://full.url/solutions"},
+    {"type": "careers", "title": "Careers", "url": "https://full.url/careers"},
+    {"type": "contact", "title": "Contact", "url": "https://full.url/contact"}
   ]
 }
 """.strip()
@@ -127,7 +128,11 @@ Return JSON in this format:
 
 
 def main():
-    base_url = "https://radetco.com/"
+    if len(sys.argv) < 2:
+        print("Usage: python src/llm_pick_links.py <base_url>")
+        sys.exit(1)
+
+    base_url = sys.argv[1]
 
     input_path = Path("outputs/candidate_urls.json")
     output_path = Path("outputs/final_urls.json")
